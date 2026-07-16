@@ -202,3 +202,26 @@ def ask_question_stream(question: Question, db: Session = Depends(get_db)):
         yield "data: [DONE]\n\n"
 
     return StreamingResponse(event_stream(), media_type="text/event-stream")
+
+@app.get("/documents")
+def list_documents(db: Session = Depends(get_db)):
+    docs = db.query(Document).order_by(Document.uploaded_at.desc()).all()
+    return [
+        {
+            "id": doc.id,
+            "filename": doc.filename,
+            "uploaded_at": doc.uploaded_at.isoformat(),
+            "chunk_count": len(doc.chunks),
+        }
+        for doc in docs
+    ]
+
+
+@app.delete("/documents/{document_id}")
+def delete_document(document_id: int, db: Session = Depends(get_db)):
+    doc = db.query(Document).filter(Document.id == document_id).first()
+    if not doc:
+        return {"error": "Document not found"}
+    db.delete(doc)
+    db.commit()
+    return {"deleted": document_id}

@@ -1,0 +1,309 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>RAG Document Q&A</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  html, body { font-family: 'Inter', system-ui, sans-serif; }
+  .scrollbar::-webkit-scrollbar { width: 6px; }
+  .scrollbar::-webkit-scrollbar-thumb { background: #334155; border-radius: 3px; }
+  .fade-in { animation: fadeIn .3s ease-out; }
+  @keyframes fadeIn { from { opacity: 0; transform: translateY(4px);} to { opacity: 1; transform: translateY(0);} }
+  .pulse-dot { animation: pulse 2s infinite; }
+  @keyframes pulse { 0%,100% { opacity: 1;} 50% { opacity: .4;} }
+  .cite-badge { display:inline-block; background:#1e293b; color:#60a5fa; padding:1px 6px; border-radius:4px; font-size:12px; margin:0 2px; font-weight:500; }
+  .prose-answer { line-height: 1.7; white-space: pre-wrap; }
+  .prose-answer code { background:#1e293b; padding:2px 6px; border-radius:4px; font-size:.9em; }
+</style>
+</head>
+<body class="bg-slate-950 text-slate-100 h-screen overflow-hidden">
+
+<div class="flex h-screen">
+
+  <!-- ===================== SIDEBAR ===================== -->
+  <aside class="w-72 bg-slate-900 border-r border-slate-800 flex flex-col">
+    <div class="p-5 border-b border-slate-800">
+      <h1 class="text-lg font-semibold flex items-center gap-2">
+        <span class="text-blue-400">◆</span> RAG Q&A
+      </h1>
+      <p class="text-xs text-slate-400 mt-1">Chat with your documents</p>
+    </div>
+
+    <!-- Upload button -->
+    <div class="p-4">
+      <label class="block cursor-pointer">
+        <input type="file" accept=".pdf" id="fileInput" class="hidden" onchange="uploadPDF()"/>
+        <div class="bg-blue-600 hover:bg-blue-500 transition text-white text-sm font-medium py-2.5 px-4 rounded-lg text-center">
+          + Upload PDF
+        </div>
+      </label>
+      <div id="uploadStatus" class="text-xs text-slate-400 mt-2 hidden"></div>
+    </div>
+
+    <!-- Documents list -->
+    <div class="px-4 pb-2">
+      <div class="text-xs uppercase tracking-wider text-slate-500 font-medium">Documents</div>
+    </div>
+    <div id="docList" class="flex-1 overflow-y-auto scrollbar px-3 pb-4 space-y-1"></div>
+
+    <!-- Status footer -->
+    <div class="p-4 border-t border-slate-800 text-xs">
+      <div class="flex items-center gap-2">
+        <span id="statusDot" class="w-2 h-2 rounded-full bg-slate-600"></span>
+        <span id="statusText" class="text-slate-400">Checking API…</span>
+      </div>
+    </div>
+  </aside>
+
+  <!-- ===================== MAIN CHAT ===================== -->
+  <main class="flex-1 flex flex-col">
+    <!-- Top bar -->
+    <header class="h-16 border-b border-slate-800 flex items-center justify-between px-6">
+      <div>
+        <div class="text-sm text-slate-400">Session</div>
+        <div class="font-medium">Ask a question about your documents</div>
+      </div>
+      <div class="flex items-center gap-4 text-xs">
+        <a href="http://localhost:3000" target="_blank" class="text-slate-400 hover:text-blue-400">Grafana ↗</a>
+        <a href="http://localhost:8000/docs" target="_blank" class="text-slate-400 hover:text-blue-400">API Docs ↗</a>
+      </div>
+    </header>
+
+    <!-- Chat area -->
+    <div id="chat" class="flex-1 overflow-y-auto scrollbar p-6 space-y-6">
+      <div class="text-center text-slate-500 text-sm mt-20 fade-in">
+        Upload a PDF, then ask any question about it.<br/>
+        Answers are grounded in the document and include citations.
+      </div>
+    </div>
+
+    <!-- Input -->
+    <div class="border-t border-slate-800 p-4">
+      <div class="flex gap-2 max-w-4xl mx-auto">
+        <input id="qInput" type="text" placeholder="Ask a question about your documents…"
+          class="flex-1 bg-slate-900 border border-slate-800 rounded-lg px-4 py-3 text-sm focus:outline-none focus:border-blue-500 transition"
+          onkeydown="if(event.key==='Enter') askQuestion()"/>
+        <button onclick="askQuestion()" id="askBtn"
+          class="bg-blue-600 hover:bg-blue-500 transition text-white font-medium px-6 py-3 rounded-lg text-sm">
+          Ask
+        </button>
+      </div>
+    </div>
+  </main>
+
+  <!-- ===================== METRICS PANEL ===================== -->
+  <aside class="w-64 bg-slate-900 border-l border-slate-800 p-5 space-y-4">
+    <h2 class="text-sm font-semibold text-slate-300">Live metrics</h2>
+    <div class="space-y-3">
+      <div class="bg-slate-800/50 rounded-lg p-3">
+        <div class="text-xs text-slate-400">Queries answered</div>
+        <div id="mAnswered" class="text-2xl font-semibold text-emerald-400">—</div>
+      </div>
+      <div class="bg-slate-800/50 rounded-lg p-3">
+        <div class="text-xs text-slate-400">Queries refused</div>
+        <div id="mRefused" class="text-2xl font-semibold text-amber-400">—</div>
+      </div>
+      <div class="bg-slate-800/50 rounded-lg p-3">
+        <div class="text-xs text-slate-400">Avg retrieval latency</div>
+        <div id="mLatency" class="text-2xl font-semibold text-blue-400">— <span class="text-sm font-normal">ms</span></div>
+      </div>
+      <div class="bg-slate-800/50 rounded-lg p-3">
+        <div class="text-xs text-slate-400">Total LLM cost</div>
+        <div id="mCost" class="text-2xl font-semibold text-purple-400">$—</div>
+      </div>
+    </div>
+    <div class="text-xs text-slate-500 pt-2">Refreshes every 5s</div>
+  </aside>
+
+</div>
+
+<script>
+const API = "http://localhost:8000";
+
+// ---------- Health check ----------
+async function checkHealth() {
+  const dot = document.getElementById("statusDot");
+  const txt = document.getElementById("statusText");
+  try {
+    const r = await fetch(API + "/");
+    if (r.ok) { dot.className = "w-2 h-2 rounded-full bg-emerald-400 pulse-dot"; txt.textContent = "API connected"; }
+    else throw 0;
+  } catch { dot.className = "w-2 h-2 rounded-full bg-red-500"; txt.textContent = "API offline"; }
+}
+
+// ---------- Load documents ----------
+async function loadDocs() {
+  const list = document.getElementById("docList");
+  try {
+    const r = await fetch(API + "/documents");
+    const docs = await r.json();
+    if (docs.length === 0) {
+      list.innerHTML = `<div class="text-xs text-slate-500 px-2 py-2">No documents yet</div>`;
+      return;
+    }
+    list.innerHTML = docs.map(d => `
+      <div class="group flex items-center justify-between bg-slate-800/40 hover:bg-slate-800 rounded-lg p-3 fade-in">
+        <div class="min-w-0 flex-1">
+          <div class="text-sm font-medium truncate" title="${d.filename}">${d.filename}</div>
+          <div class="text-xs text-slate-500 mt-0.5">${d.chunk_count} chunks</div>
+        </div>
+        <button onclick="deleteDoc(${d.id})" class="opacity-0 group-hover:opacity-100 text-slate-500 hover:text-red-400 transition text-lg leading-none px-1">×</button>
+      </div>
+    `).join("");
+  } catch { list.innerHTML = `<div class="text-xs text-red-400 px-2 py-2">Failed to load</div>`; }
+}
+
+async function deleteDoc(id) {
+  if (!confirm("Delete this document and all its chunks?")) return;
+  await fetch(API + "/documents/" + id, { method: "DELETE" });
+  loadDocs();
+}
+
+// ---------- Upload ----------
+async function uploadPDF() {
+  const input = document.getElementById("fileInput");
+  const status = document.getElementById("uploadStatus");
+  if (!input.files[0]) return;
+  status.classList.remove("hidden");
+  status.textContent = `Uploading ${input.files[0].name}…`;
+  const fd = new FormData();
+  fd.append("file", input.files[0]);
+  try {
+    const r = await fetch(API + "/upload", { method: "POST", body: fd });
+    const data = await r.json();
+    status.textContent = `✓ Uploaded — ${data.num_chunks} chunks created`;
+    setTimeout(() => status.classList.add("hidden"), 3000);
+    input.value = "";
+    loadDocs();
+  } catch { status.textContent = "✗ Upload failed"; }
+}
+
+// ---------- Ask question (streaming) ----------
+async function askQuestion() {
+  const input = document.getElementById("qInput");
+  const btn = document.getElementById("askBtn");
+  const chat = document.getElementById("chat");
+  const query = input.value.trim();
+  if (!query) return;
+
+  // If placeholder message present, clear it
+  if (chat.querySelector(".text-center")) chat.innerHTML = "";
+
+  // User bubble
+  const userDiv = document.createElement("div");
+  userDiv.className = "flex justify-end fade-in";
+  userDiv.innerHTML = `<div class="bg-blue-600 text-white rounded-2xl rounded-tr-sm px-4 py-2.5 max-w-2xl text-sm">${escapeHtml(query)}</div>`;
+  chat.appendChild(userDiv);
+
+  // Assistant bubble
+  const assistantDiv = document.createElement("div");
+  assistantDiv.className = "flex justify-start fade-in";
+  assistantDiv.innerHTML = `
+    <div class="bg-slate-800 rounded-2xl rounded-tl-sm px-4 py-3 max-w-2xl w-full">
+      <div class="citations text-xs text-slate-400 mb-2 hidden"></div>
+      <div class="answer prose-answer text-sm text-slate-100"></div>
+      <div class="cursor inline-block w-1.5 h-4 bg-blue-400 ml-0.5 pulse-dot"></div>
+    </div>`;
+  chat.appendChild(assistantDiv);
+  const answerEl = assistantDiv.querySelector(".answer");
+  const citeEl = assistantDiv.querySelector(".citations");
+  const cursor = assistantDiv.querySelector(".cursor");
+
+  input.value = "";
+  btn.disabled = true;
+  chat.scrollTop = chat.scrollHeight;
+
+  try {
+    const res = await fetch(API + "/ask/stream", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ query, top_k: 5 })
+    });
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "";
+    let raw = "";
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split("\n\n");
+      buffer = lines.pop();
+      for (const line of lines) {
+        if (!line.startsWith("data: ")) continue;
+        const payload = line.slice(6);
+        if (payload === "[DONE]") break;
+        try {
+          const msg = JSON.parse(payload);
+          if (msg.type === "citations") {
+            citeEl.classList.remove("hidden");
+            citeEl.innerHTML = "Sources: " + msg.content.map(c =>
+              `<span class="cite-badge" title="Document ${c.document_id} · distance ${c.distance.toFixed(3)}">Source ${c.source_number}</span>`
+            ).join("");
+          } else if (msg.type === "token") {
+            raw += msg.content;
+            answerEl.innerHTML = renderAnswer(raw);
+            chat.scrollTop = chat.scrollHeight;
+          } else if (msg.type === "answer") {
+            raw = msg.content;
+            answerEl.innerHTML = renderAnswer(raw);
+          }
+        } catch {}
+      }
+    }
+  } catch (e) {
+    answerEl.textContent = "Something went wrong: " + e.message;
+  } finally {
+    cursor.remove();
+    btn.disabled = false;
+    loadMetrics();
+  }
+}
+
+// ---------- Simple answer renderer (highlights [Source N], code blocks) ----------
+function renderAnswer(text) {
+  let html = escapeHtml(text);
+  html = html.replace(/\[Source (\d+)\]/g, '<span class="cite-badge">Source $1</span>');
+  html = html.replace(/```([\s\S]*?)```/g, '<pre class="bg-slate-900 rounded p-3 my-2 text-xs overflow-x-auto"><code>$1</code></pre>');
+  html = html.replace(/`([^`]+)`/g, '<code>$1</code>');
+  return html;
+}
+function escapeHtml(s) { return s.replace(/[&<>]/g, c => ({ "&":"&amp;", "<":"&lt;", ">":"&gt;" }[c])); }
+
+// ---------- Live metrics ----------
+async function loadMetrics() {
+  try {
+    const r = await fetch(API + "/metrics");
+    const txt = await r.text();
+
+    const answered = extract(txt, /rag_queries_total\{[^}]*outcome="answered"[^}]*\}\s+([\d.]+)/);
+    const refused  = extract(txt, /rag_queries_total\{[^}]*outcome="refused"[^}]*\}\s+([\d.]+)/);
+    const latSum   = extract(txt, /rag_retrieval_latency_seconds_sum\s+([\d.e-]+)/);
+    const latCnt   = extract(txt, /rag_retrieval_latency_seconds_count\s+([\d.]+)/);
+    const cost     = extract(txt, /rag_cost_dollars_total\s+([\d.e-]+)/);
+
+    document.getElementById("mAnswered").textContent = answered ?? 0;
+    document.getElementById("mRefused").textContent  = refused ?? 0;
+    document.getElementById("mLatency").innerHTML =
+      (latSum && latCnt && latCnt > 0)
+        ? Math.round((latSum / latCnt) * 1000) + ' <span class="text-sm font-normal">ms</span>'
+        : '— <span class="text-sm font-normal">ms</span>';
+    document.getElementById("mCost").textContent = cost ? "$" + parseFloat(cost).toFixed(4) : "$0.00";
+  } catch {}
+}
+function extract(t, re) { const m = t.match(re); return m ? parseFloat(m[1]) : null; }
+
+// ---------- Init ----------
+checkHealth();
+loadDocs();
+loadMetrics();
+setInterval(loadMetrics, 5000);
+setInterval(checkHealth, 10000);
+</script>
+
+</body>
+</html>
