@@ -11,6 +11,17 @@ services:
     volumes:
       - pgdata:/var/lib/postgresql/data
 
+  app:
+    build: .
+    container_name: rag-app
+    ports:
+      - "8000:8000"
+    environment:
+      OPENAI_API_KEY: ${OPENAI_API_KEY}
+      DATABASE_URL: postgresql+psycopg://raguser:ragpass@db:5432/ragdb
+    depends_on:
+      - db
+
   prometheus:
     image: prom/prometheus:latest
     container_name: rag-prometheus

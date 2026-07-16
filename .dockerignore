@@ -1,0 +1,7 @@
+venv/
+__pycache__/
+*.pyc
+.git/
+.env
+test_stream.html
+*.md
