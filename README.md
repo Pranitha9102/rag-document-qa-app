@@ -1,10 +1,10 @@
 # RAG Document Q&A Application
 
-![RAG Document Q&A dashboard](./screenshot.png)
-
 A production-style Retrieval-Augmented Generation (RAG) application that answers questions over user-uploaded PDF documents with citation-backed responses. Built end-to-end with FastAPI, PostgreSQL + pgvector, OpenAI, Docker, and observability via Prometheus + Grafana.
 
 The project was built to demonstrate the full lifecycle of an AI-powered application: not only the retrieval and generation logic, but also the surrounding infrastructure that makes such a system deployable and observable in production — containerization, metrics, dashboards, CI/CD, and a real user interface.
+
+![RAG Document Q&A dashboard](./screenshot.png)
 
 ---
 
